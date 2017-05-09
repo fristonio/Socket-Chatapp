@@ -1,47 +1,47 @@
 #include<stdio.h>
 #include<sys/types.h>
 #include<sys/socket.h>
+#include<stdlib.h>
+#include<netinet/in.h>
+#include<netdb.h>
+#include<string.h>
 
 #define BACKLOG 10
 #define MAX_CLIENTS 10
+#define PORT "5000"
 
 struct client {
 	char handle[50];
 	char clientId;	
-}
+};
 
 int main(int argc ,char *argv[]) {
-	//Socket descriptor
-	int sock_desc = socket(AF_INET, SOCK_STREAM, 0);
+	int sock_desc;
+	struct sockaddr_storage address;
+	socklen_t addr_size;
+	struct addrinfo hints, *result;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;//Use IPv4 or v6 whatever
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+
+	getaddrinfo(NULL, PORT, &hints, &result);
+
+	sock_desc = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if (sock_desc < 0) {
 		printf(" [?] Socket creation Failed ...\n");
-		exit(0);
 	}
 	printf(" [*] Socket created successfully \n");
-
-	//Structure to store the details
-	struct sockaddr_in server;
-	memset(&server, '0', sizeof(server));
-	//Initialize the strucute
-	server.sin_addr.s_addr = htonl(INADDR_ANY);
-	server.sin_port = htons(5000);
-	server.sin_family = AF_INET;
-	int addrlen = sizeof(server);
-	if( bind(sock_desc, (struct sockaddr*)&server, sizeof(server)) == -1) {
+	if( bind(sock_desc, result->ai_addr, result->ai_addrlen) == -1 ) {
 		printf(" [?] Cannot bind address to the socket\n");
-		exit(0);
 	}
-
 	if( listen(sock_desc, BACKLOG) < 0 ) {
 		printf(" [?] Cannot Listen to the connections \n");
-		exit(0);
 	}
-
 	int new_socket;
-	if( new_socket = accept(sock_desc, (struct sockaddr *)&server, (socklen_t*)&addrlen) < 0) {
+	if( new_socket = accept(sock_desc, (struct sockaddr *)&address, &addr_size) < 0) {
 		printf(" [?] Cannot accept connections \n");
-		exit(0);
 	}
-
+	
 	return 0;
 }
