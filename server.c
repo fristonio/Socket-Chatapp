@@ -35,7 +35,8 @@ int main(int argc ,char *argv[]) {
 	memset(&hints, 0, sizeof hints);	//set hints to 0
 	hints.ai_family = AF_UNSPEC;		//Use IPv4 or v6 whatever unspecified AF_INET is for ipv4 and AF_INET6 is for v6
 	hints.ai_socktype = SOCK_STREAM;	//sock stream uses TCP protocol
-	hints.ai_flags = AI_PASSIVE;		
+	hints.ai_flags = AI_PASSIVE;		//use my IP		
+	int yes = 1;
 
 	getaddrinfo(NULL, PORT, &hints, &server_info);	//will store the addrinfo of hints into server_info
 	for(result = server_info; result!= NULL; result = result->ai_next) {
@@ -45,8 +46,7 @@ int main(int argc ,char *argv[]) {
 			perror("Socket");
 			continue;
 		}
-		printf("%d", sock_desc);
-		int yes = 1;
+		printf(" [-] Scoket descriptor  :  %d\n", sock_desc);
 		if (setsockopt(sock_desc, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1) {
     		perror("setsockopt");
     		exit(1);
@@ -74,7 +74,7 @@ int main(int argc ,char *argv[]) {
 	int i,j;
 	int new_conn;		//newly accepted socket descriptor
 	char incoming_IP[INET6_ADDRSTRLEN]; //extra size => no problem
-	char buf[BUFLEN];	//buffer for client data
+	char *buf[BUFLEN];	//buffer for client data
 
 	fd_set masterfd;	//master file descriptor
 	fd_set readfds;		//temp file descriptor list for select()
@@ -82,33 +82,46 @@ int main(int argc ,char *argv[]) {
 	int msg_len;		//max file descriptor no
 	FD_ZERO(&masterfd);	//clear the master and temp sets
 	FD_ZERO(&readfds);	//clear read file descriptor
-	FD_SET(listener, &masterfd);	//add listner to the master set since it is the only one till now
+	FD_SET(sock_desc, &masterfd);	//add listner to the master set since it is the only one till now
 	FD_SET(STDIN, &masterfd);
-	fdmax = listener;	//keep track of the biggest file descriptor till now
+	fdmax = sock_desc;	//keep track of the biggest file descriptor till now
+	
 	while(1) {
-		printf("inside the while loop with fdmax %d\n", fdmax);
 		readfds = masterfd;
 		if( select(fdmax+1, &readfds, NULL, NULL, NULL) == -1 ) {
 			perror("select");
 			exit(4);
 		}
 		//loop over all the child sockets for data to read
+		printf("got a connection to read from, current fdmax %d\n", fdmax);
 		printf("looping over the child sockets \n");
 		for(i = 0; i <= fdmax; i++) {
+			printf("inside the for loop \n");
 			if(FD_ISSET(i, &readfds)) {		//we got a connection available for reading
-				if(i == listener) {
+				
+				if(i == sock_desc) {
 					// handle new connection
+					printf("handling a new connection \n");
 					addr_size = sizeof in_address;
-					if( new_conn = accept(sock_desc, (struct sockaddr *)&in_address, &addr_size) < 0) {
+					if(( new_conn = accept(sock_desc, (struct sockaddr *)&in_address, &addr_size )) < 0) {
 						perror("Accept");
 						continue;
 					}
+					printf(" New connection file descriptor %d\n",new_conn);
+					FD_SET(new_conn, &masterfd);	//add new connection to the master list
+					if(new_conn > fdmax)
+						fdmax = new_conn;
 					inet_ntop(in_address.ss_family, get_in_addr((struct sockaddr *)&in_address), incoming_IP, INET6_ADDRSTRLEN);
-					printf(" [*] Received request from the Client : %s on the Socket %d\n", incoming_IP, sock_desc);
+					printf(" [*] Received request from the Client : %s on the Socket %d\n", incoming_IP, fdmax);
+					break;
 				}
+
+
 				else {
 					//handle data from the client
-					if(msg_len = recv(i, buf, BUFLEN, 0) <= 0) {
+					printf("Handling data from the client");
+					if(( msg_len = recv(i, buf, sizeof(buf), 0) ) <= 0) {
+						//got an error or connection closed by the client
 						if(msg_len == 0)
 							printf("Socket %d hung up \n", i);
 						else
@@ -130,6 +143,7 @@ int main(int argc ,char *argv[]) {
 							}
 						}
 					}
+					break;
 				}
 			}
 		}
