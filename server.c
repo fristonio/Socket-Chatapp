@@ -13,9 +13,9 @@
 
 #define BACKLOG 10			//defines the maximum length to which the queue of pending connections can grow
 #define MAX_CLIENTS 10
-#define PORT "5000"
+#define PORT "5000"			//Port to listen on
 #define BUFLEN 1024
-#define STDIN 0
+#define STDIN 0				//Standard Input
 
 struct client {
 	char handle[50];
@@ -74,7 +74,7 @@ int main(int argc ,char *argv[]) {
 	int i,j;
 	int new_conn;		//newly accepted socket descriptor
 	char incoming_IP[INET6_ADDRSTRLEN]; //extra size => no problem
-	char *buf[BUFLEN];	//buffer for client data
+	char buf[1024];	//buffer for client data
 
 	fd_set masterfd;	//master file descriptor
 	fd_set readfds;		//temp file descriptor list for select()
@@ -96,16 +96,15 @@ int main(int argc ,char *argv[]) {
 		printf("got a connection to read from, current fdmax %d\n", fdmax);
 		printf("looping over the child sockets \n");
 		for(i = 0; i <= fdmax; i++) {
-			printf("inside the for loop \n");
 			if(FD_ISSET(i, &readfds)) {		//we got a connection available for reading
-				
+				printf("Got something set value of i %d\n",i);
 				if(i == sock_desc) {
 					// handle new connection
 					printf("handling a new connection \n");
 					addr_size = sizeof in_address;
 					if(( new_conn = accept(sock_desc, (struct sockaddr *)&in_address, &addr_size )) < 0) {
 						perror("Accept");
-						continue;
+						//continue;
 					}
 					printf(" New connection file descriptor %d\n",new_conn);
 					FD_SET(new_conn, &masterfd);	//add new connection to the master list
@@ -113,37 +112,46 @@ int main(int argc ,char *argv[]) {
 						fdmax = new_conn;
 					inet_ntop(in_address.ss_family, get_in_addr((struct sockaddr *)&in_address), incoming_IP, INET6_ADDRSTRLEN);
 					printf(" [*] Received request from the Client : %s on the Socket %d\n", incoming_IP, fdmax);
-					break;
 				}
 
 
 				else {
-					//handle data from the client
-					printf("Handling data from the client");
-					if(( msg_len = recv(i, buf, sizeof(buf), 0) ) <= 0) {
-						//got an error or connection closed by the client
-						if(msg_len == 0)
-							printf("Socket %d hung up \n", i);
-						else
-							perror("recv:");
-						close(i);
-						FD_CLR(i, &masterfd);		//remove from the master set
+					if(i == 0) {
+						//Handle the data from server
+						printf("Handling the data from standard input from server \n");
 					}
 					else {
-						//got some data from the client
-						for(j = 0; j <= fdmax; j++) {
-							//send the data to everyone
-							if(FD_ISSET(j, &masterfd)) {
-								//except the listner and the client itself
-								if(j != listener && j != i) {
-									if(send(j, buf, msg_len, 0) == -1) {
-										perror("send");
+						//handle data from the client
+						printf("Handling data from the client value of i %d\n",i);
+						if((msg_len = recv(i, buf, 1024, 0)) <= 0) {
+							printf("disconnected or hungup \n");
+							//got an error or connection closed by the client
+							if(msg_len == 0)
+								printf("Socket %d hung up \n", i);
+							else
+								perror("recv:");
+							close(i);
+							FD_CLR(i, &masterfd);		//remove from the master set
+						}
+						else {
+							buf[msg_len] = '\0';
+							printf("message length is %d\n",msg_len);
+							printf("%s   :  Inside the right area length of buf %lu and size of buf %lu \n",buf, strlen(buf), sizeof(buf));
+							//got some data from the client
+							for(j = 0; j <= fdmax; j++) {
+								//send the data to everyone
+								if(FD_ISSET(j, &masterfd)) {
+									//except the listner and the client itself
+									if(j != sock_desc && j != i && j!=0) {
+										printf("hey there\n");
+										if(send(j, buf, msg_len, 0) == -1) {
+											perror("send");
+										}
 									}
 								}
 							}
 						}
 					}
-					break;
 				}
 			}
 		}
