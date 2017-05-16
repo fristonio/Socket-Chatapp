@@ -23,11 +23,9 @@ struct clientStruct {
 	int clientId;
 	int conn_desc;
 	char nick[40];
-	bool gotNick = FALSE;
+	int gotNick;
 };
-clientStruct *clients["MAX_CLIENTS"] = {NULL};
-
-
+struct clientStruct *clients[MAX_CLIENTS] = {NULL};
 
 
 void *get_in_addr(struct sockaddr *sa) {
@@ -38,11 +36,14 @@ void *get_in_addr(struct sockaddr *sa) {
 }
 
 void createNewClient(int new_conn) {
+	struct clientStruct *temp = (struct clientStruct *)malloc(sizeof(struct clientStruct));
 	int i;
-	for(i=0; i<MAX_CLIENTS; i++) {
+	for(i = 0; i < MAX_CLIENTS; i++) {
 		if(!clients[i]) {
-			clients[i]->clientId = i;
-			clients[i]->conn_desc = new_conn;
+			temp->clientId = i;
+			temp->conn_desc = new_conn;
+			temp->gotNick = 0;
+			clients[i] = temp;
 			return;
 		}
 	}
@@ -50,7 +51,7 @@ void createNewClient(int new_conn) {
 
 int getClientId(int connId) {
 	int i;
-	for(i=0; i<MAX_CLIENTS; i++) {
+	for(i = 0; i < MAX_CLIENTS; i++) {
 		if(clients[i]) {
 			if(clients[i]->conn_desc == connId) {
 				return i ;
@@ -60,14 +61,30 @@ int getClientId(int connId) {
 }
 
 void sendPrivate(int desc, char *msg) {
-	msg[strlen(msg)] = '\0';
-	if(send(desc, msg, strlen(msg), 0) == -1)
+	//msg[strlen(msg)] = '\0';
+	if(send(desc, msg, strlen(msg), 0) == -1) {
 		perror("Error : Send");
+	}
+}
+
+void sendAll(int conn, fd_set *tempfd, int fdmax, int sock_desc, char *msg) {
+	int j;
+	//msg[strlen(msg)] = '\0';
+	for(j = 0; j <= fdmax; j++) {
+		//Send messege to everyone rather other than sender and sock_desc
+		if(FD_ISSET(j, tempfd)) {
+			if(j != sock_desc && j != conn && j!=0) {
+				if(send(j, msg, strlen(msg), 0) == -1) {
+					perror("ERROR : Send");
+				}
+			}
+		}
+	}
 }
 
 void getNick(int new_conn) {
 
-	chat enterNick[] = "Enter a Nickname to enter the chat : ";
+	char enterNick[] = "Enter a Nickname to enter the chat : ";
 	sendPrivate(new_conn, enterNick);
 
 }
@@ -84,7 +101,7 @@ int handleNewConnection(int sock_desc, fd_set *tempfd, int fdmax) {
 		perror("Error : Accept");
 	}
 	// Add the new connection received to the master set
-	FD_SET(new_conn, &tempfd);
+	FD_SET(new_conn, tempfd);
 	if(new_conn > fdmax)
 		fdmax = new_conn;
 	inet_ntop(in_address.ss_family, get_in_addr((struct sockaddr *)&in_address), incoming_IP, INET6_ADDRSTRLEN);
@@ -98,7 +115,6 @@ int handleNewConnection(int sock_desc, fd_set *tempfd, int fdmax) {
 void pollSocket(int sock_desc) {
 
 	int i,j;
-	char buf[BUFLEN];					//buffer for client data
 	fd_set masterfd;					//master file descriptor
 	fd_set readfds;						//temp file descriptor list for select()
 	int fdmax;							//to store maximum file descriptor
@@ -126,6 +142,8 @@ void pollSocket(int sock_desc) {
 				}
 
 				else {
+					char buf[BUFLEN];					//buffer for client data
+					memset(buf, '\0', sizeof(buf));
 					// Got an activity on one of the existing connections
 					if(i == 0) {
 						//Handle the data from standard input of server server
@@ -137,15 +155,16 @@ void pollSocket(int sock_desc) {
 							sendAll(i, &masterfd, fdmax, sock_desc, serverMsg);
 						}
 					}
+
 					else {
 						//handle data from the client
 						int clientId = getClientId(i);
-						if((msg_len = recv(i, buf, 1024, 0)) <= 0) {
+						if((msg_len = recv(i, buf, 1023, 0)) <= 0) {
 							//got an error or connection closed by the client
 							if(msg_len == 0) {
 								//Connection closed by client
-								printf("%s left the chat. \n", clients[clientId]->name);
-								sprintf(buf, "%s left the chat. \n", clients[clientId]->name);
+								printf("%s left the chat. \n", clients[clientId]->nick);
+								sprintf(buf, "%s left the chat. \n", clients[clientId]->nick);
 								sendAll(i, &masterfd, fdmax, sock_desc, buf);
 							}
 							else {
@@ -157,20 +176,33 @@ void pollSocket(int sock_desc) {
 						}
 						else {
 							// A messege recieved from the client
-							int clientId = getClientId(i);
-							buf[strlen(buf)] = '\0';
+							//buf[msg_len] = '\0';
+							// netcat attaches a \n at the end of the message we replace it by null character
+							buf[strlen(buf)-1] = '\0';
+							char *inMsg;
+							inMsg = malloc(strlen(buf)+1);
+							memset(inMsg, '\0', sizeof(inMsg));
+							strncpy(inMsg, buf, strlen(buf));
 							if(!clients[clientId]->gotNick) {
 								// New client entered his name in the chat
-								clients[clientId]->gotNick = TRUE;
+								clients[clientId]->gotNick = 1;
 								char welcomeMsg[BUFLEN];
-								sprintf(welcomeMsg, "Welcome || @%s", clients[clientId]->nick);
+								memset(welcomeMsg, '\0', sizeof(welcomeMsg));
+								strncpy(clients[clientId]->nick, inMsg, sizeof(inMsg));
+								sprintf(welcomeMsg, "Welcome || @%s to #chat : \n", clients[clientId]->nick);
 								sendPrivate(i, welcomeMsg);
-								sprintf(welcomeMsg, "@%s joined the chat ", clients[clientId]->nick);
+								printf("@%s joined the chat \n", clients[clientId]->nick);
+								memset(welcomeMsg, '\0', sizeof(welcomeMsg));
+								sprintf(welcomeMsg, "@%s joined the chat \n", clients[clientId]->nick);
 								sendAll(i, &masterfd, fdmax, sock_desc, welcomeMsg);
 							}
 							else {
 								// A new messege is recieved from a user in chat
-								sendAll(i, &masterfd, fdmax, sock_desc, buf);
+								char outMsg[BUFLEN];
+								memset(outMsg, '\0', sizeof(outMsg));
+								printf("[%s] : %s\n", clients[clientId]->nick, inMsg);
+								sprintf(outMsg, "[%s] : %s\n", clients[clientId]->nick, inMsg);
+								sendAll(i, &masterfd, fdmax, sock_desc, outMsg);
 							}
 						}
 					}
