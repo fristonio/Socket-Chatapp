@@ -20,6 +20,14 @@
 #define STDIN 0				//Standard Input
 
 
+typedef enum {
+	PRIVATE_MESSAGE,
+	INFO_USERS,
+	HELP,
+	BROADCAST_MSG,
+	COMMAND_ERR
+} actions;
+
 struct clientStruct {
 	int clientId;
 	int conn_desc;
@@ -109,7 +117,7 @@ void sendAll(int conn, fd_set *tempfd, int fdmax, int sock_desc, char *msg) {
 }
 
 void getNick(int new_conn) {
-
+	printf(" [+] Sent req for entering name to join chat \n");
 	char enterNick[] = "Enter a Nickname to enter the chat : ";
 	sendPrivate(new_conn, enterNick);
 
@@ -180,55 +188,52 @@ void setNick(char *inMsg, int conn, int sock_desc, fd_set *tempfd, int fdmax) {
 }
 
 
-void handleClientInput(int sock_desc, int fdmax, fd_set *tempfd, char *inMsg, int conn) {
+void handleClientInput(int sock_desc, int fdmax, fd_set *tempfd, char *inMsg, int conn, actions action) {
 	int clientId = getClientId(conn);
 	char outMsg[BUFLEN];
-	char user[30];
-	char action[10];
 	memset(outMsg, '\0', sizeof(outMsg));
+	char chatUser[30];
 	int i = 1;
-	switch(inMsg[0]) {
-		case '@' : 	
-					while(!isspace(inMsg[i])) {
-						user[i-1] = inMsg[i];
-						i++;
-					}
-					user[i-1] = '\0';
-					int userConn = getClientConnDesc(user);
-					if(userConn) { 
-						printf("[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
-						sprintf(outMsg, "[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
-						sendPrivate(userConn, outMsg);
-					}
-					else {
-						sprintf(outMsg, "The user you entered is not present !! ");
-						sendPrivate(conn, outMsg);
-					}
-					break;
+	switch(action) {
+		case PRIVATE_MESSAGE :
+								while(!isspace(inMsg[i])) {
+									chatUser[i-1] = inMsg[i];
+									i++;
+								}
+								chatUser[i-1] = '\0';
+								int userConn = getClientConnDesc(chatUser);
+								if(userConn) { 
+									printf("[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
+									sprintf(outMsg, "[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
+									sendPrivate(userConn, outMsg);
+								}
+								else {
+									sprintf(outMsg, "The user you entered is not present !! ");
+									sendPrivate(conn, outMsg);
+								}
+								break;
 
-		case '!' :  
-					while(!isspace(inMsg[i])) {
-						action[i-1] = inMsg[i];
-						i++;
-					}
-					action[i-1] = '\0';
-					if(!strcmp(action, "users")) {
-						sprintf(outMsg, " ****** USERS INFO ****** \n");
-						printf(" [*] User asked for users info \n");
-						getClientDetails(outMsg);
-						sendPrivate(conn, outMsg);
-					}
-					else {
-						sprintf(outMsg, "Wrong Command!!! Try again");
-						sendPrivate(conn, outMsg);
-					}
-					break;
+		case INFO_USERS :
+								sprintf(outMsg, " ****** USERS INFO ****** \n");
+								printf(" [*] User asked for users info \n");
+								getClientDetails(outMsg);
+								sendPrivate(conn, outMsg);
+								break;
 
-		default :	
-					printf("[%s] : %s \n", clients[clientId]->nick, inMsg);
-					sprintf(outMsg, "[%s] : %s \n", clients[clientId]->nick, inMsg);
-					sendAll(conn, tempfd, fdmax, sock_desc, outMsg);
-					break;
+		case COMMAND_ERR :	
+								sprintf(outMsg, "Wrong Command!!! Try again \n");
+								sendPrivate(conn, outMsg);
+
+		case HELP :			
+								sprintf(outMsg, " *** HELP ***\n [+] @[username] message : for private message\n [+] !users : for getting current users info\n [+] !help : For help \n");
+								sendPrivate(conn, outMsg);
+								break;
+
+		case BROADCAST_MSG :	
+								printf("[%s] : %s \n", clients[clientId]->nick, inMsg);
+								sprintf(outMsg, "[%s] : %s \n", clients[clientId]->nick, inMsg);
+								sendAll(conn, tempfd, fdmax, sock_desc, outMsg);
+								break;
 	}
 }
 
@@ -297,7 +302,33 @@ void pollSocket(int sock_desc) {
 							}
 							else {
 								// A new messege is recieved from a user in chat
-								handleClientInput(sock_desc, fdmax, &masterfd, inMsg, i);
+								char fc = inMsg[0];
+								int k = 0;
+								char temp[30];
+								memset(temp, '\0', sizeof(temp));
+								actions action;
+								switch(fc) {
+									case '@' :  action = PRIVATE_MESSAGE;
+												break;
+
+									case '!' :	while(!isspace(inMsg[k])) {
+													temp[k-1] = inMsg[k];
+													k++;
+												}
+												temp[k-1] = '\0';
+												if(!strcmp(temp, "users")) 
+													action = INFO_USERS;
+												else
+													if(!strcmp(temp, "help"))
+														action = HELP;
+													else
+														action = COMMAND_ERR;
+												break;
+
+									default : action = BROADCAST_MSG;
+											  break;
+								}
+								handleClientInput(sock_desc, fdmax, &masterfd, inMsg, i, action);
 
 							}
 						}
@@ -314,6 +345,16 @@ void pollSocket(int sock_desc) {
 ===============================*/
 
 int main(int argc, char *argv[]) {
+	printf(" [*] Starting Server \n");
+	char *port;
+	if(argc != 2) {
+		printf(" [-] Usage %s [port] \n", argv[0]);
+		printf(" [*] Using default PORT 5000 for server \n");
+		port = PORT;
+	}
+	else
+		port = argv[1];
+
 	int sock_desc;						//socket descriptor and listner descriptor
 	struct addrinfo hints, *server_info, *result;	//addrinfo structure is used to store host address information
 	
@@ -324,7 +365,7 @@ int main(int argc, char *argv[]) {
 	hints.ai_flags = AI_PASSIVE;		//use my IP		
 	int yes = 1;						//flag for setsockopt
 
-	getaddrinfo(NULL, PORT, &hints, &server_info);	//will store the addrinfo of hints into server_info
+	getaddrinfo(NULL, port, &hints, &server_info);	//will store the addrinfo of hints into server_info
 	
 	for(result = server_info; result!= NULL; result = result->ai_next) {
 		sock_desc = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
