@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -60,6 +61,31 @@ int getClientId(int connId) {
 	}
 }
 
+int getClientConnDesc(char *client) {
+	int i;
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(clients[i]) {
+			if(!strcmp(client, clients[i]->nick)) {
+				return clients[i]->conn_desc;
+			}
+		}
+	}
+}
+
+void getClientDetails(char *outMsg) {
+	int i;
+	int count = 1;
+	char nick[50];
+	for(i = 0; i < MAX_CLIENTS; i++) {
+		if(clients[i]) {
+			memset(nick, '\0', sizeof(nick));
+			sprintf(nick, "  [%d] %s \n",count, clients[i]->nick);
+			strcat(outMsg, nick);
+			count++;
+		}
+	}
+}
+
 void sendPrivate(int desc, char *msg) {
 	//msg[strlen(msg)] = '\0';
 	if(send(desc, msg, strlen(msg), 0) == -1) {
@@ -112,6 +138,101 @@ int handleNewConnection(int sock_desc, fd_set *tempfd, int fdmax) {
 	return fdmax;
 }
 
+void handleServerInput(fd_set *tempfd, int fdmax, int sock_desc) {
+	char buf[BUFLEN];
+	memset(buf, '\0', sizeof(buf));
+	if(fgets(buf, 1023, stdin) == NULL)
+		return;
+	else {
+		char serverMsg[1024];
+		sprintf(serverMsg, "[SERVER] : %s", buf);
+		sendAll(0, tempfd, fdmax, sock_desc, serverMsg);
+	}
+}
+
+void handleClientConnection(int sock_desc, int fdmax, int conn, fd_set *tempfd, int msg_len) {
+	int clientId = getClientId(conn);
+	char buf[BUFLEN];
+	if(msg_len == 0) {
+	//Connection closed by client
+		printf("[%s] : left the chat. \n", clients[clientId]->nick);
+		sprintf(buf, "[%s] : left the chat. \n", clients[clientId]->nick);
+		sendAll(conn, tempfd, fdmax, sock_desc, buf);
+	}
+	else {
+		perror("Error : recv:");
+	}
+}
+
+void setNick(char *inMsg, int conn, int sock_desc, fd_set *tempfd, int fdmax) {
+	int clientId = getClientId(conn);
+	char welcomeMsg[BUFLEN];
+	memset(welcomeMsg, '\0', sizeof(welcomeMsg));
+
+	strncpy(clients[clientId]->nick, inMsg, sizeof(inMsg));
+	sprintf(welcomeMsg, "Welcome || @%s to #chat : \n", clients[clientId]->nick);
+	sendPrivate(conn, welcomeMsg);
+
+	printf("@%s joined the chat \n", clients[clientId]->nick);
+	memset(welcomeMsg, '\0', sizeof(welcomeMsg));
+	sprintf(welcomeMsg, "@%s joined the chat \n", clients[clientId]->nick);
+	sendAll(conn, tempfd, fdmax, sock_desc, welcomeMsg);
+}
+
+
+void handleClientInput(int sock_desc, int fdmax, fd_set *tempfd, char *inMsg, int conn) {
+	int clientId = getClientId(conn);
+	char outMsg[BUFLEN];
+	char user[30];
+	char action[10];
+	memset(outMsg, '\0', sizeof(outMsg));
+	int i = 1;
+	switch(inMsg[0]) {
+		case '@' : 	
+					while(!isspace(inMsg[i])) {
+						user[i-1] = inMsg[i];
+						i++;
+					}
+					user[i-1] = '\0';
+					int userConn = getClientConnDesc(user);
+					if(userConn) { 
+						printf("[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
+						sprintf(outMsg, "[%s] : [PRIVATE] : %s \n", clients[clientId]->nick, inMsg);
+						sendPrivate(userConn, outMsg);
+					}
+					else {
+						sprintf(outMsg, "The user you entered is not present !! ");
+						sendPrivate(conn, outMsg);
+					}
+					break;
+
+		case '!' :  
+					while(!isspace(inMsg[i])) {
+						action[i-1] = inMsg[i];
+						i++;
+					}
+					action[i-1] = '\0';
+					if(!strcmp(action, "users")) {
+						sprintf(outMsg, " ****** USERS INFO ****** \n");
+						printf(" [*] User asked for users info \n");
+						getClientDetails(outMsg);
+						sendPrivate(conn, outMsg);
+					}
+					else {
+						sprintf(outMsg, "Wrong Command!!! Try again");
+						sendPrivate(conn, outMsg);
+					}
+					break;
+
+		default :	
+					printf("[%s] : %s \n", clients[clientId]->nick, inMsg);
+					sprintf(outMsg, "[%s] : %s \n", clients[clientId]->nick, inMsg);
+					sendAll(conn, tempfd, fdmax, sock_desc, outMsg);
+					break;
+	}
+}
+
+
 void pollSocket(int sock_desc) {
 
 	int i,j;
@@ -142,18 +263,12 @@ void pollSocket(int sock_desc) {
 				}
 
 				else {
-					char buf[BUFLEN];					//buffer for client data
+					char buf[BUFLEN];
 					memset(buf, '\0', sizeof(buf));
 					// Got an activity on one of the existing connections
 					if(i == 0) {
 						//Handle the data from standard input of server server
-						if(fgets(buf, 1023, stdin) == NULL)
-							return;
-						else {
-							char serverMsg[1024];
-							sprintf(serverMsg, "[SERVER] : %s", buf);
-							sendAll(i, &masterfd, fdmax, sock_desc, serverMsg);
-						}
+						handleServerInput(&masterfd, fdmax, sock_desc);
 					}
 
 					else {
@@ -161,48 +276,29 @@ void pollSocket(int sock_desc) {
 						int clientId = getClientId(i);
 						if((msg_len = recv(i, buf, 1023, 0)) <= 0) {
 							//got an error or connection closed by the client
-							if(msg_len == 0) {
-								//Connection closed by client
-								printf("%s left the chat. \n", clients[clientId]->nick);
-								sprintf(buf, "%s left the chat. \n", clients[clientId]->nick);
-								sendAll(i, &masterfd, fdmax, sock_desc, buf);
-							}
-							else {
-								perror("Error : recv:");
-							}
+							handleClientConnection(sock_desc, fdmax, i, &masterfd, msg_len);
 							close(i);
 							FD_CLR(i, &masterfd);		//remove from the master set
 							clients[clientId] = NULL;
 						}
 						else {
 							// A messege recieved from the client
-							//buf[msg_len] = '\0';
 							// netcat attaches a \n at the end of the message we replace it by null character
 							buf[strlen(buf)-1] = '\0';
 							char *inMsg;
 							inMsg = malloc(strlen(buf)+1);
 							memset(inMsg, '\0', sizeof(inMsg));
 							strncpy(inMsg, buf, strlen(buf));
+
 							if(!clients[clientId]->gotNick) {
 								// New client entered his name in the chat
 								clients[clientId]->gotNick = 1;
-								char welcomeMsg[BUFLEN];
-								memset(welcomeMsg, '\0', sizeof(welcomeMsg));
-								strncpy(clients[clientId]->nick, inMsg, sizeof(inMsg));
-								sprintf(welcomeMsg, "Welcome || @%s to #chat : \n", clients[clientId]->nick);
-								sendPrivate(i, welcomeMsg);
-								printf("@%s joined the chat \n", clients[clientId]->nick);
-								memset(welcomeMsg, '\0', sizeof(welcomeMsg));
-								sprintf(welcomeMsg, "@%s joined the chat \n", clients[clientId]->nick);
-								sendAll(i, &masterfd, fdmax, sock_desc, welcomeMsg);
+								setNick(inMsg, i, sock_desc, &masterfd, fdmax);	
 							}
 							else {
 								// A new messege is recieved from a user in chat
-								char outMsg[BUFLEN];
-								memset(outMsg, '\0', sizeof(outMsg));
-								printf("[%s] : %s\n", clients[clientId]->nick, inMsg);
-								sprintf(outMsg, "[%s] : %s\n", clients[clientId]->nick, inMsg);
-								sendAll(i, &masterfd, fdmax, sock_desc, outMsg);
+								handleClientInput(sock_desc, fdmax, &masterfd, inMsg, i);
+
 							}
 						}
 					}
