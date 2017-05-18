@@ -117,7 +117,7 @@ void sendAll(int conn, fd_set *tempfd, int fdmax, int sock_desc, char *msg) {
 }
 
 void getNick(int new_conn) {
-	printf(" [+] Sent req for entering name to join chat \n");
+	printf("[+] Sent req for entering name to join chat \n");
 	char enterNick[] = "Enter a Nickname to enter the chat : ";
 	sendPrivate(new_conn, enterNick);
 
@@ -139,7 +139,7 @@ int handleNewConnection(int sock_desc, fd_set *tempfd, int fdmax) {
 	if(new_conn > fdmax)
 		fdmax = new_conn;
 	inet_ntop(in_address.ss_family, get_in_addr((struct sockaddr *)&in_address), incoming_IP, INET6_ADDRSTRLEN);
-	printf(" [+] Received request from the Client : %s on the Socket %d\n", incoming_IP, fdmax);
+	printf("[+] Received request from the Client : %s on the Socket %d\n", incoming_IP, fdmax);
 	createNewClient(new_conn);
 	getNick(new_conn);
 
@@ -178,7 +178,7 @@ void setNick(char *inMsg, int conn, int sock_desc, fd_set *tempfd, int fdmax) {
 	memset(welcomeMsg, '\0', sizeof(welcomeMsg));
 
 	strncpy(clients[clientId]->nick, inMsg, sizeof(inMsg));
-	sprintf(welcomeMsg, "Welcome || @%s to #chat : \n", clients[clientId]->nick);
+	sprintf(welcomeMsg, "Welcome || @%s to #chat : \n [SERVER] : Use !help for HELP anytime during chat \n", clients[clientId]->nick);
 	sendPrivate(conn, welcomeMsg);
 
 	printf("@%s joined the chat \n", clients[clientId]->nick);
@@ -215,7 +215,7 @@ void handleClientInput(int sock_desc, int fdmax, fd_set *tempfd, char *inMsg, in
 
 		case INFO_USERS :
 								sprintf(outMsg, " ****** USERS INFO ****** \n");
-								printf(" [*] User asked for users info \n");
+								printf("[*] User asked for users info \n");
 								getClientDetails(outMsg);
 								sendPrivate(conn, outMsg);
 								break;
@@ -348,8 +348,8 @@ int main(int argc, char *argv[]) {
 	printf(" [*] Starting Server \n");
 	char *port;
 	if(argc != 2) {
-		printf(" [-] Usage %s [port] \n", argv[0]);
-		printf(" [*] Using default PORT 5000 for server \n");
+		printf("[-] Usage %s [port] \n", argv[0]);
+		printf("[*] Using default PORT 5000 for server \n");
 		port = PORT;
 	}
 	else
@@ -374,13 +374,12 @@ int main(int argc, char *argv[]) {
 			perror("Error : Socket");
 			continue;
 		}
-		printf(" [*] Scoket descriptor  :  %d\n", sock_desc);
 		if (setsockopt(sock_desc, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1) {
     		perror("Error : setsockopt");
     		exit(1);
 		} 
 		if( bind(sock_desc, result->ai_addr, result->ai_addrlen) == -1 ) {
-			printf(" [?] Server failed to bind address to the socket\n");
+			printf("[?] Server failed to bind address to the socket\n");
 			perror("Error : Bind");
 			continue;
 		}
@@ -394,13 +393,13 @@ int main(int argc, char *argv[]) {
 	}
 
 	if( listen(sock_desc, BACKLOG) < 0 ) {
-		printf(" [?] Server failed to Listen to the connections \n");
+		printf("[?] Server failed to Listen to the connections \n");
 		perror("Error : Listen");
 		exit(3);
 	}
 
-	printf(" [*] Socket listening successfully listner \n");
-	printf(" [*] Server waiting for connections \n");
+	printf("[*] Socket listening successfully listner \n");
+	printf("[*] Server waiting for connections \n");
 
 	pollSocket(sock_desc);
 	
